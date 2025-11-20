@@ -604,7 +604,7 @@ namespace Oxide.Plugins
 
             string cpLine = st.Display.TotalCheckpoints > 0 ? "CP " + Mathf.Clamp(st.Display.Checkpoint, 0, st.Display.TotalCheckpoints) + "/" + st.Display.TotalCheckpoints : "";
             string racePos = st.Display.IsRace && st.Display.Position > 0 && st.Display.Racers > 0 
-                ? "Pos " + st.Display.Position + "/" + st.Display.Racers + " [Players: " + st.Display.Racers + "]"
+                ? "Pos " + st.Display.Position + "/" + st.Display.Racers
                 : (st.Display.IsRace ? "RACE" : "TIME");
             string title = string.IsNullOrEmpty(st.Display.TrackName) ? "HydroRust" : (string.IsNullOrEmpty(modeTag) ? st.Display.TrackName : st.Display.TrackName + " " + modeTag);
             string status = st.Display.Finished ? ("Finished: " + st.Display.FinishTime.ToString("0.00", CultureInfo.InvariantCulture) + "s") : "";
