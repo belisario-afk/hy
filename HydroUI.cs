@@ -254,6 +254,7 @@ namespace Oxide.Plugins
             public bool VotingOverlayVisible;
             public bool CountdownOverlayVisible;
             public int LastCountdownValue = -1;
+            public int LastQueueCount = -1;
 
             // Input debounce markers by key ("new","select","delete")
             public Dictionary<string, float> ActiveInputEditing = new Dictionary<string, float>();
@@ -371,6 +372,13 @@ namespace Oxide.Plugins
                 PullHudTarget(player, st);
                 LerpHud(st, config.TweenSpeed, TICK_HUD);
                 if (st.HudVisible) UpdateHudElements(st);
+                
+                // Update player panel if queue count changed
+                if (st.PlayerPanelVisible && st.LastQueueCount != st.Display.QueuedPlayers)
+                {
+                    st.LastQueueCount = st.Display.QueuedPlayers;
+                    ShowPlayerPanel(player);
+                }
                 
                 // Manage voting overlay
                 if (config.ShowVotingOverlay && st.Display.Voting)

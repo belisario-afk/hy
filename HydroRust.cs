@@ -388,6 +388,15 @@ namespace Oxide.Plugins
         {
             StopTickTimers();
             autoRaceMonitor?.Destroy();
+            _pendingDelayedStart?.Destroy();
+            
+            // Cleanup race timers
+            if (currentRace != null)
+            {
+                currentRace.CountdownTimer?.Destroy();
+                currentRace.VoteTimer?.Destroy();
+            }
+            
             SaveDataFiles();
             SaveRotationIndex();
             SaveConfigSafe();
