@@ -747,10 +747,8 @@ namespace Oxide.Plugins
             st.StartMenuVisible = false;
             ShowMenuToggle(player);
             
-            // Enable HUD and build shell immediately
-            st.HudVisible = true;
-            var theme = GetTheme(GetPrefs(player.userID).ThemeName);
-            BuildHudShell(player, theme);
+            // HUD disabled per user request - only show player panel
+            st.HudVisible = false;
 
             ShowPlayerPanel(player);
         }
