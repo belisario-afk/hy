@@ -356,7 +356,7 @@ namespace Oxide.Plugins
                 }
                 
                 // Manage voting overlay
-                if (config.ShowVotingOverlay && st.Display.Voting)
+                if (config.ShowVotingOverlay && st.Display.Voting && st.Display.VoteSecondsRemaining > 0)
                 {
                     if (!st.VotingOverlayVisible)
                     {
