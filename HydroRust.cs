@@ -2407,8 +2407,8 @@ namespace Oxide.Plugins
                 Track = track,
                 State = RaceState.Staging
             };
-            BroadcastToAdmins($"Manual race staged on {track.Name}. Players /hydro race.join. Begin vote.");
-            StartBattleVote();
+            BroadcastToAdmins($"Manual race staged on {track.Name}. Players use /hydro race.join to enter. Voting will begin when first player joins.");
+            // Don't start voting immediately - wait for players to join first
         }
 
         private void CmdRaceJoin(BasePlayer player, string[] args)
@@ -2430,6 +2430,12 @@ namespace Oxide.Plugins
 
             currentRace.Participants[player.userID] = new RaceParticipant { Player = player };
             SendReply(player, $"Joined race '{currentRace.Track.Name}'.");
+            
+            // Start voting phase when first player joins (if still in Staging state)
+            if (currentRace.State == RaceState.Staging && currentRace.Participants.Count == 1)
+            {
+                StartBattleVote();
+            }
         }
 
         private void CmdRaceLeave(BasePlayer player, string[] args)
