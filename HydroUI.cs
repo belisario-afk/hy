@@ -905,11 +905,9 @@ namespace Oxide.Plugins
                 }, ROOT_PLAYER);
             }
 
-            AddTextButton(c, ROOT_PLAYER, "Join Race", "0.05 0.60", "0.60 0.90", "hydroui.player.join", theme.Good, theme.Text, 14);
-            AddTextButton(c, ROOT_PLAYER, "Leave Race", "0.62 0.60", "0.95 0.90", "hydroui.player.leave", theme.Alert, theme.Text, 14);
-            AddTextButton(c, ROOT_PLAYER, "Stats", "0.05 0.10", "0.22 0.45", "hydroui.player.stats", theme.Panel, theme.Text, 12);
-            AddTextButton(c, ROOT_PLAYER, "Vote Normal", "0.24 0.10", "0.52 0.45", "hydroui.vote.normal", theme.Panel, theme.Text, 12);
-            AddTextButton(c, ROOT_PLAYER, "Vote Battle", "0.54 0.10", "0.82 0.45", "hydroui.vote.battle", theme.Battle, theme.Text, 12);
+            AddTextButton(c, ROOT_PLAYER, "Join Race", "0.05 0.60", "0.95 0.90", "hydroui.player.join", theme.Good, theme.Text, 14);
+            AddTextButton(c, ROOT_PLAYER, "Leave Race", "0.05 0.35", "0.95 0.55", "hydroui.player.leave", theme.Alert, theme.Text, 14);
+            AddTextButton(c, ROOT_PLAYER, "Stats", "0.05 0.10", "0.95 0.30", "hydroui.player.stats", theme.Panel, theme.Text, 12);
 
             CuiHelper.AddUi(player, c);
             st.PlayerPanelVisible = true;
