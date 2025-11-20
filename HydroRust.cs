@@ -225,6 +225,8 @@ namespace Oxide.Plugins
             public RaceState State = RaceState.None;
             public float CountdownRemaining;
             public float TimeSinceStart;
+            public float VoteStartTime;
+            public float VoteDuration;
             public Dictionary<ulong, RaceParticipant> Participants = new Dictionary<ulong, RaceParticipant>();
             public List<BaseBoat> SpawnedBoats = new List<BaseBoat>();
             public Timer CountdownTimer;
@@ -719,10 +721,12 @@ namespace Oxide.Plugins
 
             currentRace.State = RaceState.Voting;
             currentRace.Votes.Clear();
-            BroadcastToRace($"Vote race mode: /hydro vote normal OR /hydro vote battle ({config?.BattleRaceVoteDurationSeconds ?? 10}s).");
+            currentRace.VoteStartTime = Time.realtimeSinceStartup;
+            currentRace.VoteDuration = config?.BattleRaceVoteDurationSeconds ?? 10;
+            BroadcastToRace($"Vote race mode: /hydro vote normal OR /hydro vote battle ({currentRace.VoteDuration}s).");
 
             currentRace.VoteTimer?.Destroy();
-            currentRace.VoteTimer = timer.Once(config?.BattleRaceVoteDurationSeconds ?? 10, FinishVoteAndProceed);
+            currentRace.VoteTimer = timer.Once(currentRace.VoteDuration, FinishVoteAndProceed);
         }
 
         private void FinishVoteAndProceed()
@@ -1652,6 +1656,18 @@ namespace Oxide.Plugins
                 dict["FinishTime"] = part.FinishTime;
                 dict["RaceMode"] = currentRace.Mode.ToString();
                 dict["Voting"] = currentRace.State == RaceState.Voting;
+                
+                // Voting time remaining
+                if (currentRace.State == RaceState.Voting)
+                {
+                    float elapsed = Time.realtimeSinceStartup - currentRace.VoteStartTime;
+                    float remaining = Mathf.Max(0, currentRace.VoteDuration - elapsed);
+                    dict["VoteSecondsRemaining"] = Mathf.CeilToInt(remaining);
+                }
+                else
+                {
+                    dict["VoteSecondsRemaining"] = 0;
+                }
                 
                 // Countdown support
                 if (currentRace.State == RaceState.Countdown)
