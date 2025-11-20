@@ -25,22 +25,16 @@ namespace Oxide.Plugins
         #region Constants
 
         private const string ROOT_START_MENU = "HydroUI.StartMenu";
-        private const string ROOT_HUD = "HydroUI.HUD";
         private const string ROOT_TOGGLE = "HydroUI.MenuToggle";
         private const string ROOT_ADMIN = "HydroUI.Admin";
         private const string ROOT_PLAYER = "HydroUI.PlayerPanel";
+        private const string ROOT_VOTING = "HydroUI.VotingOverlay";
+        private const string ROOT_COUNTDOWN = "HydroUI.CountdownOverlay";
 
         private const string START_HEADER = "HydroUI.Start.Header";
         private const string START_BODY = "HydroUI.Start.Body";
         private const string START_TAB_WELCOME = "HydroUI.Start.Tab.Welcome";
         private const string START_TAB_PLAY = "HydroUI.Start.Tab.Play";
-
-        private const string HUD_TEXT = "HydroUI.HUD.Text";
-        private const string HUD_PROGRESS_FILL = "HydroUI.HUD.Progress.Fill";
-        private const string HUD_BOOST_FILL = "HydroUI.HUD.Boost.Fill";
-        private const string HUD_SPEED_TEXT = "HydroUI.HUD.Speed.Text";
-        private const string HUD_LAP_TEXT = "HydroUI.HUD.Lap.Text";
-        private const string HUD_COMPASS_TEXT = "HydroUI.HUD.Compass.Text";
 
         private const string ADMIN_HEADER = "HydroUI.Admin.Header";
         private const string ADMIN_SUMMARY_BAR = "HydroUI.Admin.SummaryBar";
@@ -118,9 +112,6 @@ namespace Oxide.Plugins
 
         private class PluginConfig
         {
-            [JsonProperty] public float HudScaleDefault = 1.0f;
-            [JsonProperty] public bool HudCompactDefault = false;
-
             [JsonProperty] public List<Theme> Themes = new List<Theme> { new Theme { Name = "HydroBlue" } };
             [JsonProperty] public UITextures Textures = new UITextures();
             [JsonProperty] public ChatCmds Chat = new ChatCmds();
@@ -133,11 +124,6 @@ namespace Oxide.Plugins
             [JsonProperty] public string StartMenuAnchorMax = "1 1";
             [JsonProperty] public float StartHeaderHeight = 0.14f;
 
-            [JsonProperty] public string HudAnchorMin = "0.23 0.92";
-            [JsonProperty] public string HudAnchorMax = "0.77 0.99";
-            [JsonProperty] public string HudCompactAnchorMin = "0.35 0.94";
-            [JsonProperty] public string HudCompactAnchorMax = "0.65 0.99";
-
             [JsonProperty] public string AdminAnchorMin = "0.76 0.05";
             [JsonProperty] public string AdminAnchorMax = "0.99 0.95";
 
@@ -146,6 +132,9 @@ namespace Oxide.Plugins
 
             [JsonProperty] public string PlayerPanelAnchorMin = "0.84 0.02";
             [JsonProperty] public string PlayerPanelAnchorMax = "0.995 0.16";
+
+            [JsonProperty] public bool ShowVotingOverlay = true;
+            [JsonProperty] public bool ShowCountdownOverlay = true;
 
             [JsonProperty] public float RadiusStep = 0.5f;
         }
@@ -173,8 +162,6 @@ namespace Oxide.Plugins
         private class PlayerPrefs
         {
             public ulong UserId;
-            public float HudScale;
-            public bool HudCompact;
             public string ThemeName;
         }
 
@@ -196,6 +183,8 @@ namespace Oxide.Plugins
             public string RaceMode = "";
             public bool Voting;
             public int VoteSecondsRemaining;
+            public int CountdownSecondsRemaining;
+            public int QueuedPlayers;
         }
 
         private class PlayerUIState
@@ -203,20 +192,14 @@ namespace Oxide.Plugins
             public BasePlayer Player;
             public bool StartMenuVisible;
             public int CurrentTab = 1;
-            public bool HudVisible;
             public bool AdminVisible;
 
             public float StartAlpha;
-            public float HudAlpha;
             public float AdminAlpha;
 
             public HudData Target = new HudData();
             public HudData Display = new HudData();
 
-            public string LastHudText = "";
-            public string LastSpeedText = "";
-            public string LastLapText = "";
-            public string LastCompassText = "";
             public float TargetYaw;
             public float DisplayYaw;
 
@@ -242,6 +225,12 @@ namespace Oxide.Plugins
             public bool AdminCursorEnabled = true;
 
             public bool PlayerPanelVisible;
+            
+            // New overlay states
+            public bool VotingOverlayVisible;
+            public bool CountdownOverlayVisible;
+            public int LastCountdownValue = -1;
+            public int LastQueueCount = -1;
 
             // Input debounce markers by key ("new","select","delete")
             public Dictionary<string, float> ActiveInputEditing = new Dictionary<string, float>();
@@ -358,7 +347,45 @@ namespace Oxide.Plugins
                 if (player == null || !player.IsConnected) continue;
                 PullHudTarget(player, st);
                 LerpHud(st, config.TweenSpeed, TICK_HUD);
-                if (st.HudVisible) UpdateHudElements(st);
+                
+                // Update player panel if queue count changed
+                if (st.PlayerPanelVisible && st.LastQueueCount != st.Display.QueuedPlayers)
+                {
+                    st.LastQueueCount = st.Display.QueuedPlayers;
+                    ShowPlayerPanel(player);
+                }
+                
+                // Manage voting overlay
+                if (config.ShowVotingOverlay && st.Display.Voting && st.Display.VoteSecondsRemaining > 0)
+                {
+                    if (!st.VotingOverlayVisible)
+                    {
+                        ShowVotingOverlay(player, st);
+                        st.VotingOverlayVisible = true;
+                    }
+                }
+                else if (st.VotingOverlayVisible)
+                {
+                    HideVotingOverlay(player);
+                    st.VotingOverlayVisible = false;
+                }
+                
+                // Manage countdown overlay
+                if (config.ShowCountdownOverlay && st.Display.CountdownSecondsRemaining > 0)
+                {
+                    if (!st.CountdownOverlayVisible || st.LastCountdownValue != st.Display.CountdownSecondsRemaining)
+                    {
+                        ShowCountdownOverlay(player, st, st.Display.CountdownSecondsRemaining);
+                        st.CountdownOverlayVisible = true;
+                        st.LastCountdownValue = st.Display.CountdownSecondsRemaining;
+                    }
+                }
+                else if (st.CountdownOverlayVisible)
+                {
+                    HideCountdownOverlay(player);
+                    st.CountdownOverlayVisible = false;
+                    st.LastCountdownValue = -1;
+                }
             }
         }
 
@@ -367,7 +394,6 @@ namespace Oxide.Plugins
             foreach (var st in states.Values)
             {
                 st.StartAlpha = MoveToward(st.StartAlpha, st.StartMenuVisible ? 1f : 0f, TICK_ANIM / config.FadeInSeconds);
-                st.HudAlpha = MoveToward(st.HudAlpha, st.HudVisible ? 1f : 0f, TICK_ANIM / config.FadeInSeconds);
                 st.AdminAlpha = MoveToward(st.AdminAlpha, st.AdminVisible ? 1f : 0f, TICK_ANIM / config.FadeInSeconds);
             }
         }
@@ -445,6 +471,8 @@ namespace Oxide.Plugins
             st.Display.RaceMode = st.Target.RaceMode;
             st.Display.Voting = st.Target.Voting;
             st.Display.VoteSecondsRemaining = st.Target.VoteSecondsRemaining;
+            st.Display.CountdownSecondsRemaining = st.Target.CountdownSecondsRemaining;
+            st.Display.QueuedPlayers = st.Target.QueuedPlayers;
 
             st.DisplayYaw = Mathf.LerpAngle(st.DisplayYaw, st.TargetYaw, 1f - Mathf.Exp(-speed * dt));
         }
@@ -474,6 +502,8 @@ namespace Oxide.Plugins
                 st.Target.RaceMode = SafeString(data, "RaceMode");
                 st.Target.Voting = SafeBool(data, "Voting");
                 st.Target.VoteSecondsRemaining = SafeInt(data, "VoteSecondsRemaining");
+                st.Target.CountdownSecondsRemaining = SafeInt(data, "CountdownSecondsRemaining");
+                st.Target.QueuedPlayers = SafeInt(data, "QueuedPlayers");
             }
             else
             {
@@ -489,6 +519,10 @@ namespace Oxide.Plugins
                 st.Target.IsRace = false;
                 st.Target.Finished = false;
                 st.Target.FinishTime = 0f;
+                st.Target.Voting = false;
+                st.Target.VoteSecondsRemaining = 0;
+                st.Target.CountdownSecondsRemaining = -1;
+                st.Target.QueuedPlayers = 0;
 
                 var boat = player.GetMounted()?.GetComponentInParent<BaseBoat>();
                 var rb = boat ? boat.GetComponent<Rigidbody>() ?? boat.GetComponentInChildren<Rigidbody>() : null;
@@ -497,113 +531,6 @@ namespace Oxide.Plugins
             st.TargetYaw = player?.eyes != null ? player.eyes.rotation.eulerAngles.y : 0f;
         }
 
-        private void UpdateHudElements(PlayerUIState st)
-        {
-            var player = st.Player;
-            if (player == null || !player.IsConnected) return;
-
-            var theme = GetTheme(GetPrefs(player.userID).ThemeName);
-            if (!HasUi(player, ROOT_HUD))
-                BuildHudShell(player, theme);
-
-            SetBarFill(player, HUD_PROGRESS_FILL, st.Display.Progress01, theme.Progress);
-            SetBarFill(player, HUD_BOOST_FILL, st.Display.Boost01, theme.Boost);
-
-            string speedText = st.Display.Speed.ToString("0.0", CultureInfo.InvariantCulture) + " m/s";
-            if (speedText != st.LastSpeedText)
-            {
-                st.LastSpeedText = speedText;
-                CuiHelper.DestroyUi(player, HUD_SPEED_TEXT);
-                var c = new CuiElementContainer();
-                c.Add(new CuiLabel
-                {
-                    Text = { Text = speedText, FontSize = 14, Align = TextAnchor.MiddleRight, Color = theme.Text },
-                    RectTransform = { AnchorMin = "0.70 0.05", AnchorMax = "0.98 0.95" }
-                }, ROOT_HUD, HUD_SPEED_TEXT);
-                CuiHelper.AddUi(player, c);
-            }
-
-            string lapText = st.Display.TotalLaps > 0 ? "Lap " + Mathf.Clamp(st.Display.Lap, 0, st.Display.TotalLaps) + "/" + st.Display.TotalLaps : "";
-            if (lapText != st.LastLapText)
-            {
-                st.LastLapText = lapText;
-                CuiHelper.DestroyUi(player, HUD_LAP_TEXT);
-                var c = new CuiElementContainer();
-                c.Add(new CuiLabel
-                {
-                    Text = { Text = lapText, FontSize = 14, Align = TextAnchor.MiddleLeft, Color = theme.Text },
-                    RectTransform = { AnchorMin = "0.02 0.05", AnchorMax = "0.30 0.95" }
-                }, ROOT_HUD, HUD_LAP_TEXT);
-                CuiHelper.AddUi(player, c);
-            }
-
-            string modeTag = "";
-            if (st.Display.Voting) modeTag = "[Voting]";
-            else if (!string.IsNullOrEmpty(st.Display.RaceMode))
-                modeTag = st.Display.RaceMode == "Battle" ? "[Battle]" : "[Race]";
-
-            string cpLine = st.Display.TotalCheckpoints > 0 ? "CP " + Mathf.Clamp(st.Display.Checkpoint, 0, st.Display.TotalCheckpoints) + "/" + st.Display.TotalCheckpoints : "";
-            string racePos = st.Display.IsRace && st.Display.Position > 0 && st.Display.Racers > 0 ? "Pos " + st.Display.Position + "/" + st.Display.Racers : (st.Display.IsRace ? "RACE" : "TIME");
-            string title = string.IsNullOrEmpty(st.Display.TrackName) ? "HydroRust" : (string.IsNullOrEmpty(modeTag) ? st.Display.TrackName : st.Display.TrackName + " " + modeTag);
-            string status = st.Display.Finished ? ("Finished: " + st.Display.FinishTime.ToString("0.00", CultureInfo.InvariantCulture) + "s") : "";
-            string hudLine = (title + "  " + cpLine + "  " + racePos + "  " + status).Trim();
-
-            if (hudLine != st.LastHudText)
-            {
-                st.LastHudText = hudLine;
-                CuiHelper.DestroyUi(player, HUD_TEXT);
-                var c = new CuiElementContainer();
-                c.Add(new CuiLabel
-                {
-                    Text = { Text = hudLine, FontSize = 13, Align = TextAnchor.MiddleCenter, Color = theme.MutedText },
-                    RectTransform = { AnchorMin = "0.18 0.05", AnchorMax = "0.82 0.95" }
-                }, ROOT_HUD, HUD_TEXT);
-                CuiHelper.AddUi(player, c);
-            }
-
-            string compass = Mathf.Repeat(st.DisplayYaw + 360f, 360f).ToString("0", CultureInfo.InvariantCulture) + "°";
-            if (compass != st.LastCompassText)
-            {
-                st.LastCompassText = compass;
-                CuiHelper.DestroyUi(player, HUD_COMPASS_TEXT);
-                var c = new CuiElementContainer();
-                c.Add(new CuiLabel
-                {
-                    Text = { Text = compass, FontSize = 12, Align = TextAnchor.MiddleCenter, Color = theme.MutedText },
-                    RectTransform = { AnchorMin = "0.45 0.65", AnchorMax = "0.55 0.95" }
-                }, ROOT_HUD, HUD_COMPASS_TEXT);
-                CuiHelper.AddUi(player, c);
-            }
-        }
-
-        private void BuildHudShell(BasePlayer player, Theme theme)
-        {
-            var p = GetPrefs(player.userID);
-            string min = p.HudCompact ? config.HudCompactAnchorMin : config.HudAnchorMin;
-            string max = p.HudCompact ? config.HudCompactAnchorMax : config.HudAnchorMax;
-
-            var container = new CuiElementContainer();
-            container.Add(new CuiPanel { Image = { Color = theme.Background }, RectTransform = { AnchorMin = min, AnchorMax = max }, CursorEnabled = false }, "Hud", ROOT_HUD);
-            container.Add(new CuiPanel { Image = { Color = theme.Panel }, RectTransform = { AnchorMin = "0.02 0.55", AnchorMax = "0.98 0.75" }, CursorEnabled = false }, ROOT_HUD);
-            container.Add(new CuiPanel { Image = { Color = theme.Progress }, RectTransform = { AnchorMin = "0.02 0.55", AnchorMax = "0.02 0.75" }, CursorEnabled = false }, ROOT_HUD, HUD_PROGRESS_FILL);
-            container.Add(new CuiPanel { Image = { Color = theme.Panel }, RectTransform = { AnchorMin = "0.02 0.20", AnchorMax = "0.98 0.40" }, CursorEnabled = false }, ROOT_HUD);
-            container.Add(new CuiPanel { Image = { Color = theme.Boost }, RectTransform = { AnchorMin = "0.02 0.20", AnchorMax = "0.02 0.40" }, CursorEnabled = false }, ROOT_HUD, HUD_BOOST_FILL);
-            CuiHelper.AddUi(player, container);
-        }
-
-        private void SetBarFill(BasePlayer player, string name, float t, string color)
-        {
-            t = Mathf.Clamp01(t);
-            float maxX = Mathf.Lerp(0.02f, 0.98f, t);
-            string min = name == HUD_PROGRESS_FILL ? "0.02 0.55" : "0.02 0.20";
-            string mx = name == HUD_PROGRESS_FILL
-                ? maxX.ToString("0.00", CultureInfo.InvariantCulture) + " 0.75"
-                : maxX.ToString("0.00", CultureInfo.InvariantCulture) + " 0.40";
-            CuiHelper.DestroyUi(player, name);
-            var c = new CuiElementContainer();
-            c.Add(new CuiPanel { Image = { Color = color }, RectTransform = { AnchorMin = min, AnchorMax = mx }, CursorEnabled = false }, ROOT_HUD, name);
-            CuiHelper.AddUi(player, c);
-        }
 
         #endregion
 
@@ -822,11 +749,22 @@ namespace Oxide.Plugins
                 CursorEnabled = false
             }, "Overlay", ROOT_PLAYER);
 
-            AddTextButton(c, ROOT_PLAYER, "Join Race", "0.05 0.60", "0.60 0.90", "hydroui.player.join", theme.Good, theme.Text, 14);
-            AddTextButton(c, ROOT_PLAYER, "Leave Race", "0.62 0.60", "0.95 0.90", "hydroui.player.leave", theme.Alert, theme.Text, 14);
-            AddTextButton(c, ROOT_PLAYER, "Stats", "0.05 0.10", "0.22 0.45", "hydroui.player.stats", theme.Panel, theme.Text, 12);
-            AddTextButton(c, ROOT_PLAYER, "Vote Normal", "0.24 0.10", "0.52 0.45", "hydroui.vote.normal", theme.Panel, theme.Text, 12);
-            AddTextButton(c, ROOT_PLAYER, "Vote Battle", "0.54 0.10", "0.82 0.45", "hydroui.vote.battle", theme.Battle, theme.Text, 12);
+            // Show queue count if available
+            string queueText = st.Display.QueuedPlayers > 0 
+                ? "Queue: " + st.Display.QueuedPlayers 
+                : "";
+            if (!string.IsNullOrEmpty(queueText))
+            {
+                c.Add(new CuiLabel
+                {
+                    Text = { Text = queueText, FontSize = 11, Align = TextAnchor.MiddleCenter, Color = theme.Accent },
+                    RectTransform = { AnchorMin = "0.84 0.90", AnchorMax = "0.95 0.98" }
+                }, ROOT_PLAYER);
+            }
+
+            AddTextButton(c, ROOT_PLAYER, "Join Race", "0.05 0.60", "0.95 0.90", "hydroui.player.join", theme.Good, theme.Text, 14);
+            AddTextButton(c, ROOT_PLAYER, "Leave Race", "0.05 0.35", "0.95 0.55", "hydroui.player.leave", theme.Alert, theme.Text, 14);
+            AddTextButton(c, ROOT_PLAYER, "Stats", "0.05 0.10", "0.95 0.30", "hydroui.player.stats", theme.Panel, theme.Text, 12);
 
             CuiHelper.AddUi(player, c);
             st.PlayerPanelVisible = true;
@@ -871,6 +809,94 @@ namespace Oxide.Plugins
         {
             var player = arg.Player(); if (player == null) return;
             RunChat(player, config.Chat.VoteBattle);
+        }
+
+        private void ShowVotingOverlay(BasePlayer player, PlayerUIState st)
+        {
+            var theme = GetTheme(GetPrefs(player.userID).ThemeName);
+            HideVotingOverlay(player);
+
+            var c = new CuiElementContainer();
+            
+            // Semi-transparent backdrop
+            c.Add(new CuiPanel
+            {
+                Image = { Color = "0 0 0 0.75" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                CursorEnabled = false
+            }, "Overlay", ROOT_VOTING);
+
+            // Main voting panel
+            c.Add(new CuiPanel
+            {
+                Image = { Color = theme.Panel },
+                RectTransform = { AnchorMin = "0.35 0.40", AnchorMax = "0.65 0.60" },
+                CursorEnabled = false
+            }, ROOT_VOTING, ROOT_VOTING + ".Panel");
+
+            // Title
+            c.Add(new CuiLabel
+            {
+                Text = { Text = "VOTE FOR RACE MODE", FontSize = 20, Align = TextAnchor.MiddleCenter, Color = theme.Text },
+                RectTransform = { AnchorMin = "0.05 0.70", AnchorMax = "0.95 0.95" }
+            }, ROOT_VOTING + ".Panel");
+
+            // Normal button
+            AddTextButton(c, ROOT_VOTING + ".Panel", "NORMAL", "0.05 0.35", "0.47 0.65", 
+                "hydroui.vote.normal", theme.Good, theme.Text, 18);
+
+            // Battle button
+            AddTextButton(c, ROOT_VOTING + ".Panel", "BATTLE", "0.53 0.35", "0.95 0.65", 
+                "hydroui.vote.battle", theme.Battle, theme.Text, 18);
+
+            // Time remaining
+            string timeText = st.Display.VoteSecondsRemaining > 0 
+                ? st.Display.VoteSecondsRemaining + "s remaining" 
+                : "Vote now!";
+            c.Add(new CuiLabel
+            {
+                Text = { Text = timeText, FontSize = 14, Align = TextAnchor.MiddleCenter, Color = theme.MutedText },
+                RectTransform = { AnchorMin = "0.05 0.10", AnchorMax = "0.95 0.30" }
+            }, ROOT_VOTING + ".Panel");
+
+            CuiHelper.AddUi(player, c);
+        }
+
+        private void HideVotingOverlay(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, ROOT_VOTING);
+        }
+
+        private void ShowCountdownOverlay(BasePlayer player, PlayerUIState st, int seconds)
+        {
+            var theme = GetTheme(GetPrefs(player.userID).ThemeName);
+            HideCountdownOverlay(player);
+
+            var c = new CuiElementContainer();
+            
+            // Main countdown display (no backdrop to keep visibility)
+            string displayText = seconds > 0 ? seconds.ToString() : "GO!";
+            string color = seconds > 0 ? theme.Primary : theme.Good;
+            
+            c.Add(new CuiPanel
+            {
+                Image = { Color = "0 0 0 0" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                CursorEnabled = false
+            }, "Overlay", ROOT_COUNTDOWN);
+
+            c.Add(new CuiLabel
+            {
+                Text = { Text = displayText, FontSize = 80, Align = TextAnchor.MiddleCenter, Color = color },
+                RectTransform = { AnchorMin = "0.40 0.45", AnchorMax = "0.60 0.55" }
+            }, ROOT_COUNTDOWN);
+
+            CuiHelper.AddUi(player, c);
+        }
+
+        private void HideCountdownOverlay(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, ROOT_COUNTDOWN);
         }
 
         #endregion
@@ -1504,13 +1530,15 @@ namespace Oxide.Plugins
         {
             var st = EnsureState(player);
             st.StartMenuVisible = false;
-            st.HudVisible = false;
             st.AdminVisible = false;
+            st.VotingOverlayVisible = false;
+            st.CountdownOverlayVisible = false;
 
             DestroyStartMenu(player);
-            CuiHelper.DestroyUi(player, ROOT_HUD);
             CuiHelper.DestroyUi(player, ROOT_ADMIN);
             DestroyPlayerPanel(player);
+            HideVotingOverlay(player);
+            HideCountdownOverlay(player);
 
             if (!keepToggle)
                 DestroyMenuToggle(player);
@@ -1522,7 +1550,23 @@ namespace Oxide.Plugins
                 HideAll(p, false);
         }
 
-        private bool HasUi(BasePlayer player, string name) => false;
+        private bool HasUi(BasePlayer player, string name)
+        {
+            if (player == null || string.IsNullOrEmpty(name)) return false;
+            var st = EnsureState(player);
+            if (st == null) return false;
+            
+            switch (name)
+            {
+                case ROOT_START_MENU: return st.StartMenuVisible;
+                case ROOT_ADMIN: return st.AdminVisible;
+                case ROOT_TOGGLE: return st.MenuToggleVisible;
+                case ROOT_PLAYER: return st.PlayerPanelVisible;
+                case ROOT_VOTING: return st.VotingOverlayVisible;
+                case ROOT_COUNTDOWN: return st.CountdownOverlayVisible;
+                default: return false;
+            }
+        }
 
         private Theme GetTheme(string name = null)
         {
@@ -1602,8 +1646,6 @@ namespace Oxide.Plugins
                 p = new PlayerPrefs
                 {
                     UserId = id,
-                    HudScale = config.HudScaleDefault,
-                    HudCompact = config.HudCompactDefault,
                     ThemeName = config.Themes.First().Name
                 };
                 prefs[id] = p;

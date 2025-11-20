@@ -225,6 +225,8 @@ namespace Oxide.Plugins
             public RaceState State = RaceState.None;
             public float CountdownRemaining;
             public float TimeSinceStart;
+            public float VoteStartTime;
+            public float VoteDuration;
             public Dictionary<ulong, RaceParticipant> Participants = new Dictionary<ulong, RaceParticipant>();
             public List<BaseBoat> SpawnedBoats = new List<BaseBoat>();
             public Timer CountdownTimer;
@@ -388,6 +390,15 @@ namespace Oxide.Plugins
         {
             StopTickTimers();
             autoRaceMonitor?.Destroy();
+            _pendingDelayedStart?.Destroy();
+            
+            // Cleanup race timers
+            if (currentRace != null)
+            {
+                currentRace.CountdownTimer?.Destroy();
+                currentRace.VoteTimer?.Destroy();
+            }
+            
             SaveDataFiles();
             SaveRotationIndex();
             SaveConfigSafe();
@@ -710,10 +721,12 @@ namespace Oxide.Plugins
 
             currentRace.State = RaceState.Voting;
             currentRace.Votes.Clear();
-            BroadcastToRace($"Vote race mode: /hydro vote normal OR /hydro vote battle ({config?.BattleRaceVoteDurationSeconds ?? 10}s).");
+            currentRace.VoteStartTime = Time.realtimeSinceStartup;
+            currentRace.VoteDuration = config?.BattleRaceVoteDurationSeconds ?? 10;
+            BroadcastToRace($"Vote race mode: /hydro vote normal OR /hydro vote battle ({currentRace.VoteDuration}s).");
 
             currentRace.VoteTimer?.Destroy();
-            currentRace.VoteTimer = timer.Once(config?.BattleRaceVoteDurationSeconds ?? 10, FinishVoteAndProceed);
+            currentRace.VoteTimer = timer.Once(currentRace.VoteDuration, FinishVoteAndProceed);
         }
 
         private void FinishVoteAndProceed()
@@ -1617,7 +1630,9 @@ namespace Oxide.Plugins
                 ["FinishTime"] = 0f,
                 ["RaceMode"] = "None",
                 ["Voting"] = false,
-                ["VoteSecondsRemaining"] = 0
+                ["VoteSecondsRemaining"] = 0,
+                ["CountdownSecondsRemaining"] = -1,
+                ["QueuedPlayers"] = raceQueue.Count
             };
 
             if (player == null || !player.IsConnected) return dict;
@@ -1641,6 +1656,24 @@ namespace Oxide.Plugins
                 dict["FinishTime"] = part.FinishTime;
                 dict["RaceMode"] = currentRace.Mode.ToString();
                 dict["Voting"] = currentRace.State == RaceState.Voting;
+                
+                // Voting time remaining
+                if (currentRace.State == RaceState.Voting)
+                {
+                    float elapsed = Time.realtimeSinceStartup - currentRace.VoteStartTime;
+                    float remaining = Mathf.Max(0, currentRace.VoteDuration - elapsed);
+                    dict["VoteSecondsRemaining"] = Mathf.CeilToInt(remaining);
+                }
+                else
+                {
+                    dict["VoteSecondsRemaining"] = 0;
+                }
+                
+                // Countdown support
+                if (currentRace.State == RaceState.Countdown)
+                    dict["CountdownSecondsRemaining"] = Mathf.Max(0, Mathf.CeilToInt(currentRace.CountdownRemaining));
+                else
+                    dict["CountdownSecondsRemaining"] = -1;
 
                 float laps = Mathf.Max(1, t?.Laps ?? 1);
                 float cps = Mathf.Max(1, t?.Checkpoints.Count ?? 1);
@@ -2374,8 +2407,8 @@ namespace Oxide.Plugins
                 Track = track,
                 State = RaceState.Staging
             };
-            BroadcastToAdmins($"Manual race staged on {track.Name}. Players /hydro race.join. Begin vote.");
-            StartBattleVote();
+            BroadcastToAdmins($"Manual race staged on {track.Name}. Players use /hydro race.join to enter. Voting will begin when first player joins.");
+            // Don't start voting immediately - wait for players to join first
         }
 
         private void CmdRaceJoin(BasePlayer player, string[] args)
@@ -2397,6 +2430,12 @@ namespace Oxide.Plugins
 
             currentRace.Participants[player.userID] = new RaceParticipant { Player = player };
             SendReply(player, $"Joined race '{currentRace.Track.Name}'.");
+            
+            // Start voting phase when first player joins (if still in Staging state)
+            if (currentRace.State == RaceState.Staging && currentRace.Participants.Count == 1)
+            {
+                StartBattleVote();
+            }
         }
 
         private void CmdRaceLeave(BasePlayer player, string[] args)
