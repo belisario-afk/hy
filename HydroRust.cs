@@ -1617,7 +1617,9 @@ namespace Oxide.Plugins
                 ["FinishTime"] = 0f,
                 ["RaceMode"] = "None",
                 ["Voting"] = false,
-                ["VoteSecondsRemaining"] = 0
+                ["VoteSecondsRemaining"] = 0,
+                ["CountdownSecondsRemaining"] = -1,
+                ["QueuedPlayers"] = raceQueue.Count
             };
 
             if (player == null || !player.IsConnected) return dict;
@@ -1641,6 +1643,12 @@ namespace Oxide.Plugins
                 dict["FinishTime"] = part.FinishTime;
                 dict["RaceMode"] = currentRace.Mode.ToString();
                 dict["Voting"] = currentRace.State == RaceState.Voting;
+                
+                // Countdown support
+                if (currentRace.State == RaceState.Countdown)
+                    dict["CountdownSecondsRemaining"] = Mathf.Max(0, Mathf.CeilToInt(currentRace.CountdownRemaining));
+                else
+                    dict["CountdownSecondsRemaining"] = -1;
 
                 float laps = Mathf.Max(1, t?.Laps ?? 1);
                 float cps = Mathf.Max(1, t?.Checkpoints.Count ?? 1);

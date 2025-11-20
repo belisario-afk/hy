@@ -29,6 +29,8 @@ namespace Oxide.Plugins
         private const string ROOT_TOGGLE = "HydroUI.MenuToggle";
         private const string ROOT_ADMIN = "HydroUI.Admin";
         private const string ROOT_PLAYER = "HydroUI.PlayerPanel";
+        private const string ROOT_VOTING = "HydroUI.VotingOverlay";
+        private const string ROOT_COUNTDOWN = "HydroUI.CountdownOverlay";
 
         private const string START_HEADER = "HydroUI.Start.Header";
         private const string START_BODY = "HydroUI.Start.Body";
@@ -147,6 +149,9 @@ namespace Oxide.Plugins
             [JsonProperty] public string PlayerPanelAnchorMin = "0.84 0.02";
             [JsonProperty] public string PlayerPanelAnchorMax = "0.995 0.16";
 
+            [JsonProperty] public bool ShowVotingOverlay = true;
+            [JsonProperty] public bool ShowCountdownOverlay = true;
+
             [JsonProperty] public float RadiusStep = 0.5f;
         }
 
@@ -196,6 +201,8 @@ namespace Oxide.Plugins
             public string RaceMode = "";
             public bool Voting;
             public int VoteSecondsRemaining;
+            public int CountdownSecondsRemaining;
+            public int QueuedPlayers;
         }
 
         private class PlayerUIState
@@ -242,6 +249,11 @@ namespace Oxide.Plugins
             public bool AdminCursorEnabled = true;
 
             public bool PlayerPanelVisible;
+            
+            // New overlay states
+            public bool VotingOverlayVisible;
+            public bool CountdownOverlayVisible;
+            public int LastCountdownValue = -1;
 
             // Input debounce markers by key ("new","select","delete")
             public Dictionary<string, float> ActiveInputEditing = new Dictionary<string, float>();
@@ -359,6 +371,38 @@ namespace Oxide.Plugins
                 PullHudTarget(player, st);
                 LerpHud(st, config.TweenSpeed, TICK_HUD);
                 if (st.HudVisible) UpdateHudElements(st);
+                
+                // Manage voting overlay
+                if (config.ShowVotingOverlay && st.Display.Voting)
+                {
+                    if (!st.VotingOverlayVisible)
+                    {
+                        ShowVotingOverlay(player, st);
+                        st.VotingOverlayVisible = true;
+                    }
+                }
+                else if (st.VotingOverlayVisible)
+                {
+                    HideVotingOverlay(player);
+                    st.VotingOverlayVisible = false;
+                }
+                
+                // Manage countdown overlay
+                if (config.ShowCountdownOverlay && st.Display.CountdownSecondsRemaining > 0)
+                {
+                    if (!st.CountdownOverlayVisible || st.LastCountdownValue != st.Display.CountdownSecondsRemaining)
+                    {
+                        ShowCountdownOverlay(player, st, st.Display.CountdownSecondsRemaining);
+                        st.CountdownOverlayVisible = true;
+                        st.LastCountdownValue = st.Display.CountdownSecondsRemaining;
+                    }
+                }
+                else if (st.CountdownOverlayVisible)
+                {
+                    HideCountdownOverlay(player);
+                    st.CountdownOverlayVisible = false;
+                    st.LastCountdownValue = -1;
+                }
             }
         }
 
@@ -445,6 +489,8 @@ namespace Oxide.Plugins
             st.Display.RaceMode = st.Target.RaceMode;
             st.Display.Voting = st.Target.Voting;
             st.Display.VoteSecondsRemaining = st.Target.VoteSecondsRemaining;
+            st.Display.CountdownSecondsRemaining = st.Target.CountdownSecondsRemaining;
+            st.Display.QueuedPlayers = st.Target.QueuedPlayers;
 
             st.DisplayYaw = Mathf.LerpAngle(st.DisplayYaw, st.TargetYaw, 1f - Mathf.Exp(-speed * dt));
         }
@@ -474,6 +520,8 @@ namespace Oxide.Plugins
                 st.Target.RaceMode = SafeString(data, "RaceMode");
                 st.Target.Voting = SafeBool(data, "Voting");
                 st.Target.VoteSecondsRemaining = SafeInt(data, "VoteSecondsRemaining");
+                st.Target.CountdownSecondsRemaining = SafeInt(data, "CountdownSecondsRemaining");
+                st.Target.QueuedPlayers = SafeInt(data, "QueuedPlayers");
             }
             else
             {
@@ -489,6 +537,10 @@ namespace Oxide.Plugins
                 st.Target.IsRace = false;
                 st.Target.Finished = false;
                 st.Target.FinishTime = 0f;
+                st.Target.Voting = false;
+                st.Target.VoteSecondsRemaining = 0;
+                st.Target.CountdownSecondsRemaining = -1;
+                st.Target.QueuedPlayers = 0;
 
                 var boat = player.GetMounted()?.GetComponentInParent<BaseBoat>();
                 var rb = boat ? boat.GetComponent<Rigidbody>() ?? boat.GetComponentInChildren<Rigidbody>() : null;
@@ -543,7 +595,9 @@ namespace Oxide.Plugins
                 modeTag = st.Display.RaceMode == "Battle" ? "[Battle]" : "[Race]";
 
             string cpLine = st.Display.TotalCheckpoints > 0 ? "CP " + Mathf.Clamp(st.Display.Checkpoint, 0, st.Display.TotalCheckpoints) + "/" + st.Display.TotalCheckpoints : "";
-            string racePos = st.Display.IsRace && st.Display.Position > 0 && st.Display.Racers > 0 ? "Pos " + st.Display.Position + "/" + st.Display.Racers : (st.Display.IsRace ? "RACE" : "TIME");
+            string racePos = st.Display.IsRace && st.Display.Position > 0 && st.Display.Racers > 0 
+                ? "Pos " + st.Display.Position + "/" + st.Display.Racers + " [Players: " + st.Display.Racers + "]"
+                : (st.Display.IsRace ? "RACE" : "TIME");
             string title = string.IsNullOrEmpty(st.Display.TrackName) ? "HydroRust" : (string.IsNullOrEmpty(modeTag) ? st.Display.TrackName : st.Display.TrackName + " " + modeTag);
             string status = st.Display.Finished ? ("Finished: " + st.Display.FinishTime.ToString("0.00", CultureInfo.InvariantCulture) + "s") : "";
             string hudLine = (title + "  " + cpLine + "  " + racePos + "  " + status).Trim();
@@ -681,6 +735,9 @@ namespace Oxide.Plugins
             DestroyStartMenu(player);
             st.StartMenuVisible = false;
             ShowMenuToggle(player);
+            
+            // Enable HUD
+            st.HudVisible = true;
 
             ShowPlayerPanel(player);
         }
@@ -822,6 +879,19 @@ namespace Oxide.Plugins
                 CursorEnabled = false
             }, "Overlay", ROOT_PLAYER);
 
+            // Show queue count if available
+            string queueText = st.Display.QueuedPlayers > 0 
+                ? "Queue: " + st.Display.QueuedPlayers 
+                : "";
+            if (!string.IsNullOrEmpty(queueText))
+            {
+                c.Add(new CuiLabel
+                {
+                    Text = { Text = queueText, FontSize = 11, Align = TextAnchor.MiddleCenter, Color = theme.Accent },
+                    RectTransform = { AnchorMin = "0.84 0.90", AnchorMax = "0.95 0.98" }
+                }, ROOT_PLAYER);
+            }
+
             AddTextButton(c, ROOT_PLAYER, "Join Race", "0.05 0.60", "0.60 0.90", "hydroui.player.join", theme.Good, theme.Text, 14);
             AddTextButton(c, ROOT_PLAYER, "Leave Race", "0.62 0.60", "0.95 0.90", "hydroui.player.leave", theme.Alert, theme.Text, 14);
             AddTextButton(c, ROOT_PLAYER, "Stats", "0.05 0.10", "0.22 0.45", "hydroui.player.stats", theme.Panel, theme.Text, 12);
@@ -871,6 +941,94 @@ namespace Oxide.Plugins
         {
             var player = arg.Player(); if (player == null) return;
             RunChat(player, config.Chat.VoteBattle);
+        }
+
+        private void ShowVotingOverlay(BasePlayer player, PlayerUIState st)
+        {
+            var theme = GetTheme(GetPrefs(player.userID).ThemeName);
+            HideVotingOverlay(player);
+
+            var c = new CuiElementContainer();
+            
+            // Semi-transparent backdrop
+            c.Add(new CuiPanel
+            {
+                Image = { Color = "0 0 0 0.75" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                CursorEnabled = false
+            }, "Overlay", ROOT_VOTING);
+
+            // Main voting panel
+            c.Add(new CuiPanel
+            {
+                Image = { Color = theme.Panel },
+                RectTransform = { AnchorMin = "0.35 0.40", AnchorMax = "0.65 0.60" },
+                CursorEnabled = false
+            }, ROOT_VOTING, ROOT_VOTING + ".Panel");
+
+            // Title
+            c.Add(new CuiLabel
+            {
+                Text = { Text = "VOTE FOR RACE MODE", FontSize = 20, Align = TextAnchor.MiddleCenter, Color = theme.Text },
+                RectTransform = { AnchorMin = "0.05 0.70", AnchorMax = "0.95 0.95" }
+            }, ROOT_VOTING + ".Panel");
+
+            // Normal button
+            AddTextButton(c, ROOT_VOTING + ".Panel", "NORMAL", "0.05 0.35", "0.47 0.65", 
+                "hydroui.vote.normal", theme.Good, theme.Text, 18);
+
+            // Battle button
+            AddTextButton(c, ROOT_VOTING + ".Panel", "BATTLE", "0.53 0.35", "0.95 0.65", 
+                "hydroui.vote.battle", theme.Battle, theme.Text, 18);
+
+            // Time remaining
+            string timeText = st.Display.VoteSecondsRemaining > 0 
+                ? st.Display.VoteSecondsRemaining + "s remaining" 
+                : "Vote now!";
+            c.Add(new CuiLabel
+            {
+                Text = { Text = timeText, FontSize = 14, Align = TextAnchor.MiddleCenter, Color = theme.MutedText },
+                RectTransform = { AnchorMin = "0.05 0.10", AnchorMax = "0.95 0.30" }
+            }, ROOT_VOTING + ".Panel");
+
+            CuiHelper.AddUi(player, c);
+        }
+
+        private void HideVotingOverlay(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, ROOT_VOTING);
+        }
+
+        private void ShowCountdownOverlay(BasePlayer player, PlayerUIState st, int seconds)
+        {
+            var theme = GetTheme(GetPrefs(player.userID).ThemeName);
+            HideCountdownOverlay(player);
+
+            var c = new CuiElementContainer();
+            
+            // Main countdown display (no backdrop to keep visibility)
+            string displayText = seconds > 0 ? seconds.ToString() : "GO!";
+            string color = seconds > 0 ? theme.Primary : theme.Good;
+            
+            c.Add(new CuiPanel
+            {
+                Image = { Color = "0 0 0 0" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                CursorEnabled = false
+            }, "Overlay", ROOT_COUNTDOWN);
+
+            c.Add(new CuiLabel
+            {
+                Text = { Text = displayText, FontSize = 80, Align = TextAnchor.MiddleCenter, Color = color },
+                RectTransform = { AnchorMin = "0.40 0.45", AnchorMax = "0.60 0.55" }
+            }, ROOT_COUNTDOWN);
+
+            CuiHelper.AddUi(player, c);
+        }
+
+        private void HideCountdownOverlay(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, ROOT_COUNTDOWN);
         }
 
         #endregion
@@ -1506,11 +1664,15 @@ namespace Oxide.Plugins
             st.StartMenuVisible = false;
             st.HudVisible = false;
             st.AdminVisible = false;
+            st.VotingOverlayVisible = false;
+            st.CountdownOverlayVisible = false;
 
             DestroyStartMenu(player);
             CuiHelper.DestroyUi(player, ROOT_HUD);
             CuiHelper.DestroyUi(player, ROOT_ADMIN);
             DestroyPlayerPanel(player);
+            HideVotingOverlay(player);
+            HideCountdownOverlay(player);
 
             if (!keepToggle)
                 DestroyMenuToggle(player);
@@ -1522,7 +1684,24 @@ namespace Oxide.Plugins
                 HideAll(p, false);
         }
 
-        private bool HasUi(BasePlayer player, string name) => false;
+        private bool HasUi(BasePlayer player, string name)
+        {
+            if (player == null || string.IsNullOrEmpty(name)) return false;
+            var st = EnsureState(player);
+            if (st == null) return false;
+            
+            switch (name)
+            {
+                case ROOT_START_MENU: return st.StartMenuVisible;
+                case ROOT_HUD: return st.HudVisible;
+                case ROOT_ADMIN: return st.AdminVisible;
+                case ROOT_TOGGLE: return st.MenuToggleVisible;
+                case ROOT_PLAYER: return st.PlayerPanelVisible;
+                case ROOT_VOTING: return st.VotingOverlayVisible;
+                case ROOT_COUNTDOWN: return st.CountdownOverlayVisible;
+                default: return false;
+            }
+        }
 
         private Theme GetTheme(string name = null)
         {
