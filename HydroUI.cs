@@ -644,6 +644,9 @@ namespace Oxide.Plugins
             string min = p.HudCompact ? config.HudCompactAnchorMin : config.HudAnchorMin;
             string max = p.HudCompact ? config.HudCompactAnchorMax : config.HudAnchorMax;
 
+            // Destroy existing HUD first to ensure clean state
+            CuiHelper.DestroyUi(player, ROOT_HUD);
+
             var container = new CuiElementContainer();
             container.Add(new CuiPanel { Image = { Color = theme.Background }, RectTransform = { AnchorMin = min, AnchorMax = max }, CursorEnabled = false }, "Hud", ROOT_HUD);
             container.Add(new CuiPanel { Image = { Color = theme.Panel }, RectTransform = { AnchorMin = "0.02 0.55", AnchorMax = "0.98 0.75" }, CursorEnabled = false }, ROOT_HUD);
@@ -744,8 +747,10 @@ namespace Oxide.Plugins
             st.StartMenuVisible = false;
             ShowMenuToggle(player);
             
-            // Enable HUD
+            // Enable HUD and build shell immediately
             st.HudVisible = true;
+            var theme = GetTheme(GetPrefs(player.userID).ThemeName);
+            BuildHudShell(player, theme);
 
             ShowPlayerPanel(player);
         }
