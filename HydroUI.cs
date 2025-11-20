@@ -25,7 +25,6 @@ namespace Oxide.Plugins
         #region Constants
 
         private const string ROOT_START_MENU = "HydroUI.StartMenu";
-        private const string ROOT_HUD = "HydroUI.HUD";
         private const string ROOT_TOGGLE = "HydroUI.MenuToggle";
         private const string ROOT_ADMIN = "HydroUI.Admin";
         private const string ROOT_PLAYER = "HydroUI.PlayerPanel";
@@ -36,13 +35,6 @@ namespace Oxide.Plugins
         private const string START_BODY = "HydroUI.Start.Body";
         private const string START_TAB_WELCOME = "HydroUI.Start.Tab.Welcome";
         private const string START_TAB_PLAY = "HydroUI.Start.Tab.Play";
-
-        private const string HUD_TEXT = "HydroUI.HUD.Text";
-        private const string HUD_PROGRESS_FILL = "HydroUI.HUD.Progress.Fill";
-        private const string HUD_BOOST_FILL = "HydroUI.HUD.Boost.Fill";
-        private const string HUD_SPEED_TEXT = "HydroUI.HUD.Speed.Text";
-        private const string HUD_LAP_TEXT = "HydroUI.HUD.Lap.Text";
-        private const string HUD_COMPASS_TEXT = "HydroUI.HUD.Compass.Text";
 
         private const string ADMIN_HEADER = "HydroUI.Admin.Header";
         private const string ADMIN_SUMMARY_BAR = "HydroUI.Admin.SummaryBar";
@@ -120,9 +112,6 @@ namespace Oxide.Plugins
 
         private class PluginConfig
         {
-            [JsonProperty] public float HudScaleDefault = 1.0f;
-            [JsonProperty] public bool HudCompactDefault = false;
-
             [JsonProperty] public List<Theme> Themes = new List<Theme> { new Theme { Name = "HydroBlue" } };
             [JsonProperty] public UITextures Textures = new UITextures();
             [JsonProperty] public ChatCmds Chat = new ChatCmds();
@@ -134,11 +123,6 @@ namespace Oxide.Plugins
             [JsonProperty] public string StartMenuAnchorMin = "0 0";
             [JsonProperty] public string StartMenuAnchorMax = "1 1";
             [JsonProperty] public float StartHeaderHeight = 0.14f;
-
-            [JsonProperty] public string HudAnchorMin = "0.23 0.92";
-            [JsonProperty] public string HudAnchorMax = "0.77 0.99";
-            [JsonProperty] public string HudCompactAnchorMin = "0.35 0.94";
-            [JsonProperty] public string HudCompactAnchorMax = "0.65 0.99";
 
             [JsonProperty] public string AdminAnchorMin = "0.76 0.05";
             [JsonProperty] public string AdminAnchorMax = "0.99 0.95";
@@ -178,8 +162,6 @@ namespace Oxide.Plugins
         private class PlayerPrefs
         {
             public ulong UserId;
-            public float HudScale;
-            public bool HudCompact;
             public string ThemeName;
         }
 
@@ -210,20 +192,14 @@ namespace Oxide.Plugins
             public BasePlayer Player;
             public bool StartMenuVisible;
             public int CurrentTab = 1;
-            public bool HudVisible;
             public bool AdminVisible;
 
             public float StartAlpha;
-            public float HudAlpha;
             public float AdminAlpha;
 
             public HudData Target = new HudData();
             public HudData Display = new HudData();
 
-            public string LastHudText = "";
-            public string LastSpeedText = "";
-            public string LastLapText = "";
-            public string LastCompassText = "";
             public float TargetYaw;
             public float DisplayYaw;
 
@@ -371,7 +347,6 @@ namespace Oxide.Plugins
                 if (player == null || !player.IsConnected) continue;
                 PullHudTarget(player, st);
                 LerpHud(st, config.TweenSpeed, TICK_HUD);
-                if (st.HudVisible) UpdateHudElements(st);
                 
                 // Update player panel if queue count changed
                 if (st.PlayerPanelVisible && st.LastQueueCount != st.Display.QueuedPlayers)
@@ -419,7 +394,6 @@ namespace Oxide.Plugins
             foreach (var st in states.Values)
             {
                 st.StartAlpha = MoveToward(st.StartAlpha, st.StartMenuVisible ? 1f : 0f, TICK_ANIM / config.FadeInSeconds);
-                st.HudAlpha = MoveToward(st.HudAlpha, st.HudVisible ? 1f : 0f, TICK_ANIM / config.FadeInSeconds);
                 st.AdminAlpha = MoveToward(st.AdminAlpha, st.AdminVisible ? 1f : 0f, TICK_ANIM / config.FadeInSeconds);
             }
         }
@@ -557,118 +531,6 @@ namespace Oxide.Plugins
             st.TargetYaw = player?.eyes != null ? player.eyes.rotation.eulerAngles.y : 0f;
         }
 
-        private void UpdateHudElements(PlayerUIState st)
-        {
-            var player = st.Player;
-            if (player == null || !player.IsConnected) return;
-
-            var theme = GetTheme(GetPrefs(player.userID).ThemeName);
-            if (!HasUi(player, ROOT_HUD))
-                BuildHudShell(player, theme);
-
-            SetBarFill(player, HUD_PROGRESS_FILL, st.Display.Progress01, theme.Progress);
-            SetBarFill(player, HUD_BOOST_FILL, st.Display.Boost01, theme.Boost);
-
-            string speedText = st.Display.Speed.ToString("0.0", CultureInfo.InvariantCulture) + " m/s";
-            if (speedText != st.LastSpeedText)
-            {
-                st.LastSpeedText = speedText;
-                CuiHelper.DestroyUi(player, HUD_SPEED_TEXT);
-                var c = new CuiElementContainer();
-                c.Add(new CuiLabel
-                {
-                    Text = { Text = speedText, FontSize = 14, Align = TextAnchor.MiddleRight, Color = theme.Text },
-                    RectTransform = { AnchorMin = "0.70 0.05", AnchorMax = "0.98 0.95" }
-                }, ROOT_HUD, HUD_SPEED_TEXT);
-                CuiHelper.AddUi(player, c);
-            }
-
-            string lapText = st.Display.TotalLaps > 0 ? "Lap " + Mathf.Clamp(st.Display.Lap, 0, st.Display.TotalLaps) + "/" + st.Display.TotalLaps : "";
-            if (lapText != st.LastLapText)
-            {
-                st.LastLapText = lapText;
-                CuiHelper.DestroyUi(player, HUD_LAP_TEXT);
-                var c = new CuiElementContainer();
-                c.Add(new CuiLabel
-                {
-                    Text = { Text = lapText, FontSize = 14, Align = TextAnchor.MiddleLeft, Color = theme.Text },
-                    RectTransform = { AnchorMin = "0.02 0.05", AnchorMax = "0.30 0.95" }
-                }, ROOT_HUD, HUD_LAP_TEXT);
-                CuiHelper.AddUi(player, c);
-            }
-
-            string modeTag = "";
-            if (st.Display.Voting) modeTag = "[Voting]";
-            else if (!string.IsNullOrEmpty(st.Display.RaceMode))
-                modeTag = st.Display.RaceMode == "Battle" ? "[Battle]" : "[Race]";
-
-            string cpLine = st.Display.TotalCheckpoints > 0 ? "CP " + Mathf.Clamp(st.Display.Checkpoint, 0, st.Display.TotalCheckpoints) + "/" + st.Display.TotalCheckpoints : "";
-            string racePos = st.Display.IsRace && st.Display.Position > 0 && st.Display.Racers > 0 
-                ? "Pos " + st.Display.Position + "/" + st.Display.Racers
-                : (st.Display.IsRace ? "RACE" : "TIME");
-            string title = string.IsNullOrEmpty(st.Display.TrackName) ? "HydroRust" : (string.IsNullOrEmpty(modeTag) ? st.Display.TrackName : st.Display.TrackName + " " + modeTag);
-            string status = st.Display.Finished ? ("Finished: " + st.Display.FinishTime.ToString("0.00", CultureInfo.InvariantCulture) + "s") : "";
-            string hudLine = (title + "  " + cpLine + "  " + racePos + "  " + status).Trim();
-
-            if (hudLine != st.LastHudText)
-            {
-                st.LastHudText = hudLine;
-                CuiHelper.DestroyUi(player, HUD_TEXT);
-                var c = new CuiElementContainer();
-                c.Add(new CuiLabel
-                {
-                    Text = { Text = hudLine, FontSize = 13, Align = TextAnchor.MiddleCenter, Color = theme.MutedText },
-                    RectTransform = { AnchorMin = "0.18 0.05", AnchorMax = "0.82 0.95" }
-                }, ROOT_HUD, HUD_TEXT);
-                CuiHelper.AddUi(player, c);
-            }
-
-            string compass = Mathf.Repeat(st.DisplayYaw + 360f, 360f).ToString("0", CultureInfo.InvariantCulture) + "°";
-            if (compass != st.LastCompassText)
-            {
-                st.LastCompassText = compass;
-                CuiHelper.DestroyUi(player, HUD_COMPASS_TEXT);
-                var c = new CuiElementContainer();
-                c.Add(new CuiLabel
-                {
-                    Text = { Text = compass, FontSize = 12, Align = TextAnchor.MiddleCenter, Color = theme.MutedText },
-                    RectTransform = { AnchorMin = "0.45 0.65", AnchorMax = "0.55 0.95" }
-                }, ROOT_HUD, HUD_COMPASS_TEXT);
-                CuiHelper.AddUi(player, c);
-            }
-        }
-
-        private void BuildHudShell(BasePlayer player, Theme theme)
-        {
-            var p = GetPrefs(player.userID);
-            string min = p.HudCompact ? config.HudCompactAnchorMin : config.HudAnchorMin;
-            string max = p.HudCompact ? config.HudCompactAnchorMax : config.HudAnchorMax;
-
-            // Destroy existing HUD first to ensure clean state
-            CuiHelper.DestroyUi(player, ROOT_HUD);
-
-            var container = new CuiElementContainer();
-            container.Add(new CuiPanel { Image = { Color = theme.Background }, RectTransform = { AnchorMin = min, AnchorMax = max }, CursorEnabled = false }, "Hud", ROOT_HUD);
-            container.Add(new CuiPanel { Image = { Color = theme.Panel }, RectTransform = { AnchorMin = "0.02 0.55", AnchorMax = "0.98 0.75" }, CursorEnabled = false }, ROOT_HUD);
-            container.Add(new CuiPanel { Image = { Color = theme.Progress }, RectTransform = { AnchorMin = "0.02 0.55", AnchorMax = "0.02 0.75" }, CursorEnabled = false }, ROOT_HUD, HUD_PROGRESS_FILL);
-            container.Add(new CuiPanel { Image = { Color = theme.Panel }, RectTransform = { AnchorMin = "0.02 0.20", AnchorMax = "0.98 0.40" }, CursorEnabled = false }, ROOT_HUD);
-            container.Add(new CuiPanel { Image = { Color = theme.Boost }, RectTransform = { AnchorMin = "0.02 0.20", AnchorMax = "0.02 0.40" }, CursorEnabled = false }, ROOT_HUD, HUD_BOOST_FILL);
-            CuiHelper.AddUi(player, container);
-        }
-
-        private void SetBarFill(BasePlayer player, string name, float t, string color)
-        {
-            t = Mathf.Clamp01(t);
-            float maxX = Mathf.Lerp(0.02f, 0.98f, t);
-            string min = name == HUD_PROGRESS_FILL ? "0.02 0.55" : "0.02 0.20";
-            string mx = name == HUD_PROGRESS_FILL
-                ? maxX.ToString("0.00", CultureInfo.InvariantCulture) + " 0.75"
-                : maxX.ToString("0.00", CultureInfo.InvariantCulture) + " 0.40";
-            CuiHelper.DestroyUi(player, name);
-            var c = new CuiElementContainer();
-            c.Add(new CuiPanel { Image = { Color = color }, RectTransform = { AnchorMin = min, AnchorMax = mx }, CursorEnabled = false }, ROOT_HUD, name);
-            CuiHelper.AddUi(player, c);
-        }
 
         #endregion
 
@@ -746,9 +608,6 @@ namespace Oxide.Plugins
             DestroyStartMenu(player);
             st.StartMenuVisible = false;
             ShowMenuToggle(player);
-            
-            // HUD disabled per user request - only show player panel
-            st.HudVisible = false;
 
             ShowPlayerPanel(player);
         }
@@ -1671,13 +1530,11 @@ namespace Oxide.Plugins
         {
             var st = EnsureState(player);
             st.StartMenuVisible = false;
-            st.HudVisible = false;
             st.AdminVisible = false;
             st.VotingOverlayVisible = false;
             st.CountdownOverlayVisible = false;
 
             DestroyStartMenu(player);
-            CuiHelper.DestroyUi(player, ROOT_HUD);
             CuiHelper.DestroyUi(player, ROOT_ADMIN);
             DestroyPlayerPanel(player);
             HideVotingOverlay(player);
@@ -1702,7 +1559,6 @@ namespace Oxide.Plugins
             switch (name)
             {
                 case ROOT_START_MENU: return st.StartMenuVisible;
-                case ROOT_HUD: return st.HudVisible;
                 case ROOT_ADMIN: return st.AdminVisible;
                 case ROOT_TOGGLE: return st.MenuToggleVisible;
                 case ROOT_PLAYER: return st.PlayerPanelVisible;
@@ -1790,8 +1646,6 @@ namespace Oxide.Plugins
                 p = new PlayerPrefs
                 {
                     UserId = id,
-                    HudScale = config.HudScaleDefault,
-                    HudCompact = config.HudCompactDefault,
                     ThemeName = config.Themes.First().Name
                 };
                 prefs[id] = p;
